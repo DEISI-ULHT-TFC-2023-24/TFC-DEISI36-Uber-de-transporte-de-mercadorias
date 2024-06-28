@@ -2,11 +2,14 @@ package com.project.uber.controller;
 
 import com.project.uber.dtos.*;
 import com.project.uber.infra.exceptions.BusinessException;
+import com.project.uber.model.Client;
+import com.project.uber.model.Driver;
 import com.project.uber.model.Order;
 import com.project.uber.service.implementation.EmailServiceImpl;
 import com.project.uber.service.interfac.AuthenticationService;
 import com.project.uber.service.interfac.ClientService;
 
+import com.project.uber.service.interfac.DriverService;
 import com.project.uber.service.interfac.OrderService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
@@ -44,16 +47,18 @@ public class ClientController {
     private EmailServiceImpl emailService;
     @Autowired
     private OrderService orderService;
+    @Autowired
+    private DriverService driverService;
 
     // This method handles POST requests to "/register" and registers a new client.
     @PostMapping("/register") // This annotation marks the method to accept POST requests on the path "/register".
-    private ClientDto save(@RequestBody ClientDto clientDto) { // @RequestBody annotation indicates a method parameter should be bound to the body of the web request.
+    private ClientDto save(@RequestBody Client client) { // @RequestBody annotation indicates a method parameter should be bound to the body of the web request.
         try {
             // Attempts to save the client and return the saved client data.
-            return clientService.saveClient(clientDto);
+            return clientService.saveClient(client);
         } catch (BusinessException e) {
             // If there's a business logic exception, it rethrows it with a custom message.
-            throw new BusinessException("Error registering client: " + e.getMessage());
+            throw new BusinessException("Client already exists!");
         }
     }
 
@@ -71,7 +76,7 @@ public class ClientController {
             return ResponseEntity.ok(token);
         } catch (AuthenticationException e) {
             // Handles authentication failures.
-            throw new BusinessException("Error authenticating client: " + e.getMessage());
+            throw new BusinessException("Error: " + e.getMessage());
         }
     }
 
@@ -86,6 +91,17 @@ public class ClientController {
         return new ResponseEntity<>(clientDto, HttpStatus.OK);
     }
 
+    // verify if the token is valid
+    @GetMapping("/isValidToken")
+    public ResponseEntity<Boolean> isValidToken(@RequestHeader("Authorization") String token) {
+        try {
+            validateTokenAndGetClientId(token);
+            return new ResponseEntity<>(true, HttpStatus.OK);
+        } catch (BusinessException e) {
+            return new ResponseEntity<>(false, HttpStatus.OK);
+        }
+    }
+
     // This method allows clients to edit their profiles.
     @PostMapping("/editProfile") // Handles POST requests to "/editProfile".
     public ResponseEntity<?> editProfile(
@@ -98,21 +114,47 @@ public class ClientController {
         return new ResponseEntity<>(newClient, HttpStatus.OK);
     }
 
-    // This method estimates the cost of an order based on its details.
+
+    //endpoint para o cliente ver a localizaçao do
+    @GetMapping ("/getDriverLocation/{driverId}")
+    public ResponseEntity<String> getDriverLocation(@PathVariable Long driverId) {
+        try {
+            String location = driverService.getDriverLocation(driverId);
+            return new ResponseEntity<>(location, HttpStatus.OK);
+        } catch (BusinessException e) {
+            throw new BusinessException("Error getting driver location: " + e.getMessage());
+        }
+    }
+
+    //endpoint para o cliente ver a localizaçao do
+    @GetMapping ("/getTravelInformation/{driverId}/{orderId}")
+    public ResponseEntity<TravelInformationDto> getTravelInformation(@PathVariable Long driverId, @PathVariable Long orderId) {
+        try {
+            TravelInformationDto travelInformation = driverService.getTravelInformation(driverId, orderId);
+            return new ResponseEntity<>(travelInformation, HttpStatus.OK);
+        } catch (BusinessException e) {
+            throw new BusinessException("Error getting travel information: " + e.getMessage());
+        }
+    }
+
+
     @PostMapping("/estimateOrderCost") // Handles POST requests to "/estimateOrderCost".
-    public ResponseEntity<BigDecimal> estimateOrderCost(@RequestBody OrderDto orderDto ,
+    public ResponseEntity<BigDecimal> estimateOrderCost(@RequestBody OrderDto orderDto,
                                                         @RequestHeader("Authorization") String token) {
         try {
             if (orderDto == null || orderDto.getOrigin() == null || orderDto.getDestination() == null) {
                 throw new BusinessException("Origin and destination are mandatory.");
             }
 
-            if(validateTokenAndGetClientId(token) <= 0){
+            if (validateTokenAndGetClientId(token) <= 0) {
                 throw new BusinessException("Client not found.");
             }
+            validateTokenAndGetClientId(token);
 
             // Calculates the estimated cost of an order.
-            BigDecimal estimatedCost = orderService.estimateOrderCost(orderDto);
+
+            BigDecimal estimatedCost = orderService.estimateOrderCost(orderDto.getOrigin(), orderDto.getDestination(),
+                    orderDto.getCategory(), orderDto.getWidth(), orderDto.getHeight(), orderDto.getLength(), orderDto.getWeight());
 
             return new ResponseEntity<>(estimatedCost, HttpStatus.OK);
         } catch (BusinessException e) {
@@ -134,11 +176,24 @@ public class ClientController {
             }
 
             // Creates the order and returns the new order details.
-            Order order = orderService.saveOrder(orderDto, clientId);
+            OrderDto order = orderService.saveOrder(orderDto, clientId);
             return ResponseEntity.status(HttpStatus.CREATED).body(order);
         } catch (BusinessException e) {
             // Handles exceptions during order creation.
             throw new BusinessException("Error creating order: " + e.getMessage());
+        }
+    }
+
+    // This method retrieves the order history for a client based on their token and the order ID.
+    @PostMapping("/assignOrderToDriver/{orderId}")
+    public ResponseEntity<DriverDto> assignOrderToDriver(@PathVariable Long orderId, @RequestHeader("Authorization") String token) {
+        try {
+            // validar o token
+            validateTokenAndGetClientId(token);
+            DriverDto driver = orderService.assignOrderToDriver(orderId);
+            return new ResponseEntity<>(driver, HttpStatus.OK);
+        } catch (BusinessException e) {
+            throw new BusinessException("Error assign order to driver: " + e.getMessage());
         }
     }
 
@@ -157,14 +212,14 @@ public class ClientController {
 
     // This method retrieves the order history for a client based on their token.
     @GetMapping("/orderHistory") // Handles GET requests to "/orderHistory".
-    public ResponseEntity<List<Order>> getOrderHistory(
+    public ResponseEntity<List<OrderDto>> getOrderHistory(
             @RequestHeader("Authorization") String token) {
         try {
             // Validates token and retrieves client ID.
             Long clientId = validateTokenAndGetClientId(token);
 
             // Retrieves and returns the client's order history.
-            List<Order> orderHistory = orderService.getClientOrderHistory(clientId);
+            List<OrderDto> orderHistory = clientService.getClientOrderHistory(clientId);
             return new ResponseEntity<>(orderHistory, HttpStatus.OK);
         } catch (BusinessException e) {
             // Handles exceptions during retrieval of order history.
@@ -203,11 +258,10 @@ public class ClientController {
     // This method sends a simple email message.
     @PostMapping("/sendSimpleMessage")
     public ResponseEntity<Void> sendSimpleMessage(@RequestBody EmailDto emailDto) {
-        // Sends an email message using the EmailServiceImpl.
+        // Sends an email message using the EmailServiceImpl.as
         emailService.sendSimpleMessage(emailDto);
         return ResponseEntity.ok().build();
     }
-
 
 
 }

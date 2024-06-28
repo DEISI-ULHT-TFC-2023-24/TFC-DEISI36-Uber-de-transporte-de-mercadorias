@@ -1,6 +1,5 @@
 package com.project.uber.configuration;
-
-
+import com.project.uber.infra.exceptions.BusinessException;
 import com.project.uber.model.Client;
 import com.project.uber.model.Driver;
 import com.project.uber.repository.ClientRepository;
@@ -10,6 +9,7 @@ import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import org.jetbrains.annotations.NotNull;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -33,25 +33,30 @@ public class SecurityFilter extends OncePerRequestFilter {
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
             throws ServletException, IOException {
+        try {
+            String token = extractTokeHeader(request);
 
-        String token = extractTokeHeader(request);
+            if (token != null) {
+                String email = authenticationService.getClientEmailFromToken(token);
+                Client client = clientRepository.findByEmail(email);
+                Driver driver = driverRepository.findByEmail(email);
 
-        if (token != null) {
-            String email = authenticationService.getClientEmailFromToken(token);
-            Client client = clientRepository.findByEmail(email);
-            Driver driver = driverRepository.findByEmail(email); // Carregue o Driver pelo email
-
-            if (client != null) {
-                var autentication = new UsernamePasswordAuthenticationToken(client, null, client.getAuthorities());
-                SecurityContextHolder.getContext().setAuthentication(autentication);
-            } else if (driver != null) {
-                var autentication = new UsernamePasswordAuthenticationToken(driver, null, driver.getAuthorities());
-                SecurityContextHolder.getContext().setAuthentication(autentication);
+                if (client != null) {
+                    var authentication = new UsernamePasswordAuthenticationToken(client, null, client.getAuthorities());
+                    SecurityContextHolder.getContext().setAuthentication(authentication);
+                } else if (driver != null) {
+                    var authentication = new UsernamePasswordAuthenticationToken(driver, null, driver.getAuthorities());
+                    SecurityContextHolder.getContext().setAuthentication(authentication);
+                }
             }
-        }
 
-        filterChain.doFilter(request, response);
+            filterChain.doFilter(request, response);
+        } catch (BusinessException ex) {
+            response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+            response.getWriter().write("Token expired or invalid: " + ex.getMessage());
+        }
     }
+
 
     public String extractTokeHeader(HttpServletRequest request) {
         var authHeader = request.getHeader("Authorization");

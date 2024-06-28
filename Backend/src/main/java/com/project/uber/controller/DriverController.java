@@ -1,10 +1,10 @@
 package com.project.uber.controller;
-
+import jakarta.validation.Valid;
+import org.springframework.validation.BindingResult;
 import com.project.uber.dtos.*;
 import com.project.uber.enums.OrderStatus;
 import com.project.uber.infra.exceptions.BusinessException;
 import com.project.uber.model.Driver;
-import com.project.uber.model.GeoPoint;
 import com.project.uber.service.implementation.EmailServiceImpl;
 import com.project.uber.service.interfac.AuthenticationService;
 import com.project.uber.service.interfac.DriverService;
@@ -43,17 +43,18 @@ public class DriverController {
     private EmailServiceImpl emailService;
 
     // This method handles POST requests to "/register" and registers a new driver.
-    @PostMapping("/register") // This annotation marks the method to accept POST requests on the path "/register".
-    private DriverDto save(@RequestBody DriverDto driverDto) { // @RequestBody annotation indicates a method parameter should be bound to the body of the web request.
+    @PostMapping("/register")
+    public ResponseEntity<DriverDto> register(@RequestBody Driver driver) {
         try {
-            // Attempts to save the driver and return the saved driver data.
-            return driverService.saveDriver(driverDto);
-        } catch (BusinessException e) {
-            // If there's a business logic exception, it rethrows it with a custom message.
-            throw new BusinessException("Error registering driver: " + e.getMessage());
+            // Chama o serviço para salvar o driver baseado nos dados do DTO
+            DriverDto savedDriver = driverService.saveDriver(driver);
+            // Retorna uma resposta de sucesso com o DTO do driver salvo
+            return ResponseEntity.ok(savedDriver);
+        } catch (Exception e) {
+            // Em caso de outros erros, retorna uma resposta de InternalServerError
+            throw new BusinessException("Driver already exists!");
         }
     }
-
     // This method handles driver authentication with a POST request to "/login".
     @PostMapping("/login")
     public ResponseEntity<?> auth(@RequestBody AuthDto authDto) { // ResponseEntity is used to represent the whole HTTP response: status code, headers, and body.
@@ -86,34 +87,48 @@ public class DriverController {
             throw new BusinessException("Error deleting client " + e.getMessage());
         }
     }
-
-    // This method returns a list of available drivers.
-    @GetMapping("/available") // Handles GET requests to "/available".
-    public ResponseEntity<List<DriverDto>> getAvailableDrivers() {
+    @GetMapping("/checkDriverStatus") // Handles GET requests to "/deleteDriver".
+    public ResponseEntity<Boolean> statusDriver(@RequestHeader("Authorization") String token) {
         try {
-            // Retrieves a list of available drivers from the service and returns it.
-            List<DriverDto> availableDrivers = driverService.findAvailableDrivers();
-            return new ResponseEntity<>(availableDrivers, HttpStatus.OK);
+            // Validates token and retrieves driver ID. Ensures all orders are deleted before proceeding with driver deletion.
+            Long driverId = validateTokenAndGetDriverId(token);
+
+            Boolean isOnline = driverService.checkDriverStatus(driverId);
+            return new ResponseEntity<>(isOnline, HttpStatus.OK);
         } catch (BusinessException e) {
-            // Handles exceptions when fetching available drivers.
-            return ResponseEntity.badRequest().body(null); // Could implement a different error handling.
+            // Handles exceptions during driver deletion.
+            throw new BusinessException("Error deleting client " + e.getMessage());
         }
     }
 
-    // This method handles accepting an order by a driver.
-    @PostMapping("/accept-order") // Handles POST requests to "/accept-order".
-    public ResponseEntity<?> acceptOrder(@RequestBody OrderDto acceptOrderRequest,
-                                         @RequestHeader("Authorization") String token) {
-        try {
-            Long driverId = validateTokenAndGetDriverId(token);
-            // Processes the order acceptance.
-            orderService.acceptOrder(acceptOrderRequest.getId(), driverId);
 
-            return ResponseEntity.ok().body("Order with ID: " + acceptOrderRequest.getId() +
-                    " accepted successfully by driver ID: " + driverId);
-        } catch (BusinessException e) {
-            // Handles exceptions during order acceptance.
-            return ResponseEntity.badRequest().body("Error accepting order: " + e.getMessage());
+    //obtem a encomenda pelo id
+    @GetMapping("/getOrder/{orderId}")
+    public ResponseEntity<OrderDto> getOrder(@PathVariable Long orderId, @RequestHeader("Authorization") String token) {
+        validateTokenAndGetDriverId(token);
+
+        try {
+            OrderDto order = orderService.getOrderDtoById(orderId);
+            return new ResponseEntity<>(order, HttpStatus.OK);
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(new OrderDto());
+        }
+
+    }
+
+    @PutMapping("/setCurrentLocation") // Handles PUT requests to "/online".
+    public ResponseEntity<?> setCurrentLocation(@RequestBody String location, @RequestHeader("Authorization") String token) {
+        Long driverId = validateTokenAndGetDriverId(token);
+        try {
+            System.out.println("\n\n\nlocation: " + location + "\n\n\n");
+            if (location == null || location.isEmpty()) {
+                throw new BusinessException("Location must be provided to continue.");
+            }
+            driverService.updateDriverLocationAndStatus(driverId, location, true);
+            return ResponseEntity.ok().build();
+        } catch (Exception e) {
+            // Handles exceptions when setting driver status.
+            return ResponseEntity.badRequest().body(e.getMessage());
         }
     }
 
@@ -150,44 +165,57 @@ public class DriverController {
     }
 
     // This PUT mapping method is designed to handle the confirmation of a pickup by a driver.
-    @PutMapping("/pick-up")
+    @PutMapping("/pick-up/{orderId}")
     public ResponseEntity<?> confirmPickUp(
-            @RequestBody OrderDto statusChangeDto, // The order details needed for the pickup confirmation.
+            @PathVariable Long orderId,  // The order details needed for the pickup confirmation.
             @RequestHeader("Authorization") String token) { // The token is required to authenticate the driver.
         try {
-            Long driverId = validateTokenAndGetDriverId(token); // Validates the token and retrieves the driver ID.
-            orderService.confirmPickUp(statusChangeDto.getId(), driverId); // Calls the order service to confirm the pickup.
+            validateTokenAndGetDriverId(token); // Validates the token and retrieves the driver ID.
+            orderService.pickupOrderStatus(orderId); // Calls the order service to confirm the pickup.
+            return ResponseEntity.ok().build(); // Returns an OK response if successful.
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(e.getMessage()); // Returns a bad request response if an exception occurs.
+        }
+    }
+    // This PUT mapping method is designed to handle the confirmation of a pickup by a driver.
+    @PutMapping("/deliver/{orderId}")
+    public ResponseEntity<?> confirmDeliver(
+            @PathVariable Long orderId,  // The order details needed for the pickup confirmation.
+            @RequestHeader("Authorization") String token) { // The token is required to authenticate the driver.
+        try {
+           Long driverId = validateTokenAndGetDriverId(token); // Validates the token and retrieves the driver ID.
+            orderService.deliverOrderStatus(orderId, driverId); // Calls the order service to confirm the pickup.
             return ResponseEntity.ok().build(); // Returns an OK response if successful.
         } catch (Exception e) {
             return ResponseEntity.badRequest().body(e.getMessage()); // Returns a bad request response if an exception occurs.
         }
     }
 
-    // This PUT mapping method is used to mark an order as in progress.
-    @PutMapping("/in-progress")
-    public ResponseEntity<?> markAsInProgress(
-            @RequestBody OrderDto statusChangeDto, // The order details that will be updated.
-            @RequestHeader("Authorization") String token) { // The token for driver authentication.
+    // This PUT mapping method is designed to handle the confirmation of a pickup by a driver.
+    @PutMapping("/cancelled/{orderId}")
+    public ResponseEntity<?> cancelledOrder(
+            @PathVariable Long orderId,  // The order details needed for the pickup confirmation.
+            @RequestHeader("Authorization") String token) { // The token is required to authenticate the driver.
         try {
-            Long driverId = validateTokenAndGetDriverId(token); // Validates the token and gets the driver ID.
-            orderService.updateOrderStatus(statusChangeDto.getId(), OrderStatus.IN_PROGRESS, driverId); // Updates the order status to IN_PROGRESS.
-            return ResponseEntity.ok().build(); // Returns an OK response if the operation is successful.
+            Long driverId = validateTokenAndGetDriverId(token); // Validates the token and retrieves the driver ID.
+            orderService.cancelledOrderStatus(orderId, driverId); // Calls the order service to confirm the pickup.
+            return ResponseEntity.ok().build(); // Returns an OK response if successful.
         } catch (Exception e) {
-            return ResponseEntity.badRequest().body(e.getMessage()); // Returns a bad request response if there's an issue.
+            return ResponseEntity.badRequest().body(e.getMessage()); // Returns a bad request response if an exception occurs.
         }
     }
 
-    // This PUT mapping method updates the status of an order to deliver.
-    @PutMapping("/delivered")
-    public ResponseEntity<?> markAsDelivered(
-            @RequestBody OrderDto statusChangeDto, // Contains the details of the order to be marked as delivered.
-            @RequestHeader("Authorization") String token) { // Uses the token to authenticate the driver.
+    @GetMapping("/getDriverSalary") // Handles GET requests to "/deleteDriver".
+    public ResponseEntity<Double> getDriverSalary(@RequestHeader("Authorization") String token) {
         try {
-            Long driverId = validateTokenAndGetDriverId(token); // Validates the token and retrieves the driver ID.
-            orderService.updateOrderStatus(statusChangeDto.getId(), OrderStatus.DELIVERED, driverId); // Marks the order as delivered in the order service.
-            return ResponseEntity.ok().build(); // Successfully returns an OK status.
-        } catch (Exception e) {
-            return ResponseEntity.badRequest().body(e.getMessage()); // Returns a bad request response on failure.
+            // Validates token and retrieves driver ID. Ensures all orders are deleted before proceeding with driver deletion.
+            Long driverId = validateTokenAndGetDriverId(token);
+
+            Double salary = driverService.getDriverSalary(driverId);
+            return new ResponseEntity<>(salary, HttpStatus.OK);
+        } catch (BusinessException e) {
+            // Handles exceptions during driver deletion.
+            throw new BusinessException("Error deleting client " + e.getMessage());
         }
     }
 
@@ -207,6 +235,14 @@ public class DriverController {
         return new ResponseEntity<>(driverDto, HttpStatus.OK); // Returns the driver profile with an OK status.
     }
 
+    // This GET method retrieves the driver profile based on the provided token.
+    @GetMapping("/getDriverId")
+    public ResponseEntity<Long> getDriverId(
+            @RequestHeader("Authorization") String token) { // The token is used to authenticate and identify the driver.
+        Long driverId = validateTokenAndGetDriverId(token); // Validates the token and retrieves the driver ID.
+        return new ResponseEntity<>(driverId, HttpStatus.OK); // Returns the driver profile with an OK status.
+    }
+
     // This POST method allows the driver to edit their profile.
     @PostMapping("/editProfile")
     public ResponseEntity<?> editProfile(
@@ -218,12 +254,12 @@ public class DriverController {
     }
 
     // This GET method retrieves the order history for a driver.
-    @GetMapping("/orderHistory")
+   @GetMapping("/orderHistory")
     public ResponseEntity<List<OrderDto>> getDriverOrderHistory(
             @RequestHeader("Authorization") String token) { // The token is used to authenticate the driver.
         try {
             Long driverId = validateTokenAndGetDriverId(token); // Validates the token and retrieves the driver ID.
-            List<OrderDto> orderHistory = orderService.getDriverOrderHistory(driverId); // Fetches the order history from the order service.
+            List<OrderDto> orderHistory = driverService.getDriverOrderHistory(driverId); // Fetches the order history from the order service.
             return new ResponseEntity<>(orderHistory, HttpStatus.OK); // Returns the order history with an OK status.
         } catch (BusinessException e) {
             return new ResponseEntity<>(HttpStatus.UNAUTHORIZED); // Returns an unauthorized status if there's an issue with token validation.
@@ -240,6 +276,16 @@ public class DriverController {
         return new ResponseEntity<>(HttpStatus.OK); // Returns an OK status upon successful password change.
     }
 
+    // verify if the token is valid
+    @GetMapping("/isValidToken")
+    public ResponseEntity<Boolean> isValidToken(@RequestHeader("Authorization") String token) {
+        try {
+            validateTokenAndGetDriverId(token);
+            return new ResponseEntity<>(true, HttpStatus.OK);
+        } catch (BusinessException e) {
+            return new ResponseEntity<>(false, HttpStatus.OK);
+        }
+    }
 
     // This private method validates the JWT token and extracts the driver ID from it.
     private Long validateTokenAndGetDriverId(String token) {
@@ -248,7 +294,7 @@ public class DriverController {
 
         Long driverId = authenticationService.getDriverIdFromToken(tokenSliced);
         if (driverId == null || driverId <= 0) {
-            throw new BusinessException("Driver not found.");
+            throw new BusinessException("Invalid token");
         }
         return driverId;
     }

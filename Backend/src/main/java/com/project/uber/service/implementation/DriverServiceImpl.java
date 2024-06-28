@@ -1,23 +1,23 @@
 package com.project.uber.service.implementation;
 
-import com.project.uber.dtos.DriverDto;
-import com.project.uber.dtos.VehicleDto;
+import com.project.uber.dtos.*;
+import com.project.uber.enums.Category;
 import com.project.uber.infra.exceptions.BusinessException;
+import com.project.uber.model.Client;
 import com.project.uber.model.Driver;
-import com.project.uber.model.GeoPoint;
 import com.project.uber.model.Order;
 import com.project.uber.repository.DriverRepository;
+import com.project.uber.repository.OrderRepository;
 import com.project.uber.repository.VehicleRepository;
 import com.project.uber.service.interfac.DriverService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import com.project.uber.model.Vehicle;
+import org.springframework.transaction.annotation.Transactional;
 
-import java.time.LocalDate;
-import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.List;
-import java.util.stream.Collectors;
 
 @Service // Marks the class as a Spring service.
 public class DriverServiceImpl implements DriverService {
@@ -29,52 +29,72 @@ public class DriverServiceImpl implements DriverService {
     private PasswordEncoder passwordEncoder;
     @Autowired
     private VehicleRepository vehicleRepository;
+    @Autowired
+    private OrderRepository orderRepository;
 
-    // Saves a new driver to the repository after performing checks and password encryption.
-    @Override
-    public DriverDto saveDriver(DriverDto driverDto) {
+    @Transactional //para garantir que as duas operações sejam executadas ou nenhuma
+    public DriverDto saveDriver(Driver driver) {
         // Checks if a driver with the same email already exists.
-        Driver existingDriver = driverRepository.findByEmail(driverDto.email());
-        if (existingDriver != null) {
-            throw new BusinessException("Driver already exists!");
-        }
+        verifyDriverUniqueAttributes(driver.getEmail(), driver.getPhoneNumber(), driver.getTaxPayerNumber());
+        // Checks if a vehicle with the same plate already exists.
+        verifyVehicleUniqueAttributes(driver.getVehicle().getPlate());
+        // Criptografa a senha
+        String encryptedPassword = passwordEncoder.encode(driver.getPassword());
+        // inicializa salary
+        double salary = 0;
 
-        // Encrypts the password.
-        String encryptedPassword = passwordEncoder.encode(driverDto.password());
-        // Parses the birthdate from String to LocalDate.
-        LocalDate birthdate = LocalDate.parse(driverDto.birthdate(), DateTimeFormatter.ofPattern("dd/MM/yyyy"));
+        // Cria uma nova entidade Driver
+        Driver newDriver = new Driver(driver.getName(), driver.getEmail(), encryptedPassword,
+                driver.getBirthdate(), driver.getPhoneNumber(), driver.getTaxPayerNumber(),
+                driver.getStreet(), driver.getCity(), driver.getPostalCode(),
+                salary, driver.getVehicle(), driver.getLocation());
 
-        // Creates a new Driver object and saves it in the database.
-        Driver newDriver = new Driver(driverDto.name(), driverDto.email(), birthdate, encryptedPassword,
-                driverDto.phoneNumber(), driverDto.taxPayerNumber(), driverDto.street(),
-                driverDto.city(), driverDto.postalCode());
-        newDriver = driverRepository.save(newDriver);
+        // Salva o driver no banco de dados
+        driverRepository.save(newDriver);
 
-        // If vehicle information is present, associates and saves the vehicle for the driver.
-        Vehicle vehicleInfo = driverDto.vehicleDto();
-        if (vehicleInfo != null) {
-            Vehicle vehicle = new Vehicle();
-            vehicle.setDriver(newDriver);
-            vehicle.setYear(vehicleInfo.getYear());
-            vehicle.setPlate(vehicleInfo.getPlate());
-            vehicle.setBrand(vehicleInfo.getBrand());
-            vehicle.setModel(vehicleInfo.getModel());
-            vehicle.setVehicleType(vehicleInfo.getVehicleType());
-            vehicle.setCapacity(vehicleInfo.getCapacity());
-            vehicleRepository.save(vehicle);
-        }
-
-        // Formats the birthdate for return.
-        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("dd/MM/yyyy");
-        String formattedBirthdate = newDriver.getBirthdate().format(formatter);
-
-        // Returns the newly created DriverDto.
-        return new DriverDto(newDriver.getName(), newDriver.getEmail(), formattedBirthdate, newDriver.getPhoneNumber(),
-                newDriver.getTaxPayerNumber(), newDriver.getStreet(), newDriver.getCity(),
-                newDriver.getPostalCode(), vehicleInfo);
+        // Retorna um novo DriverDto
+        return convertToDriverDto(newDriver);
     }
 
-    // Changes the online status of a driver.
+    private void verifyDriverUniqueAttributes(String email, String phoneNumber, int taxPayerNumber) {
+        Driver driverWithSameEmail = driverRepository.findByEmail(email);
+        Driver driverWithSamePhoneNumber = driverRepository.findByPhoneNumber(phoneNumber);
+        Driver driverWithSameTaxPayerNumber = driverRepository.findByTaxPayerNumber(taxPayerNumber);
+        if (driverWithSameEmail != null || driverWithSamePhoneNumber != null ||
+                driverWithSameTaxPayerNumber != null ) {
+            throw new BusinessException("Driver already exists!");
+        }
+    }
+
+    private void verifyVehicleUniqueAttributes(String plate ) {
+        Vehicle vehicle = vehicleRepository.findByPlate(plate);
+        if (vehicle != null) {
+            throw new BusinessException("Vehicle already exists!");
+        }
+    }
+
+    @Override
+    public String getDriverLocation(Long driverId) {
+        Driver driver = driverRepository.findById(driverId).orElseThrow(() -> new BusinessException("Driver not found."));
+        return driver.getLocation();
+    }
+
+    @Override
+    public TravelInformationDto getTravelInformation(Long driverId, Long orderId) {
+        Driver driver = driverRepository.findById(driverId).orElseThrow(() -> new BusinessException("Driver not found."));
+        Order order = orderRepository.findById(orderId).orElseThrow(() -> new BusinessException("Order not found."));
+
+        return new TravelInformationDto(driver.getLocation(), order.getStatus().toString());
+
+    }
+
+    @Override
+    public double getDriverSalary(Long driverId) {
+        Driver driver = driverRepository.findById(driverId).orElseThrow(() -> new BusinessException("Driver not found."));
+        return driver.getSalary();
+    }
+
+        // Changes the online status of a driver.
     @Override
     public void setDriverOnlineStatus(Long driverId, boolean isOnline) throws Exception {
         Driver driver = driverRepository.findById(driverId).orElseThrow(() -> new Exception("Driver not found."));
@@ -88,6 +108,11 @@ public class DriverServiceImpl implements DriverService {
         driverRepository.deleteById(driverId);
     }
 
+    @Override
+    public Boolean checkDriverStatus(Long driverId) {
+        Driver driver = driverRepository.findById(driverId).orElseThrow(() -> new BusinessException("Driver not found."));
+        return driver.getIsOnline();
+    }
     // Retrieves a driver by ID, throwing an exception if not found.
     @Override
     public Driver getDriverById(Long driverId) {
@@ -108,44 +133,63 @@ public class DriverServiceImpl implements DriverService {
     @Override
     public DriverDto viewProfile(Long driverId) {
         Driver driver = getDriverById(driverId);
-        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("dd/MM/yyyy");
-        String formattedBirthdate = driver.getBirthdate().format(formatter);
-        return new DriverDto(driver.getName(), driver.getEmail(), formattedBirthdate, driver.getPhoneNumber(),
-                driver.getTaxPayerNumber(), driver.getStreet(), driver.getCity(), driver.getPostalCode(),
-                driver.getVehicle());
+        return convertToDriverDto(driver);
+    }
+
+    @Override
+    public List<OrderDto> getDriverOrderHistory(Long driverId) {
+        // converter a lista de Order para OrderDto
+        List<Order> orders = orderRepository.findByDriverId(driverId);
+        List<OrderDto> orderDtos = new ArrayList<>();
+        for (Order order : orders) {
+            orderDtos.add(convertToFullOrderDto(order));
+        }
+        return orderDtos;
+    }
+
+
+    public OrderDto convertToFullOrderDto(Order order) {
+        if (order.getCategory() == Category.MOTORIZED) {
+            return new OrderDto(order.getId(), order.getOrigin(), order.getDestination(), order.getValue(),
+                    order.getStatus(), order.getDescription(), order.getFeedback(), order.getCategory(),
+                    null, null, null, null, order.getLicensePlate(), order.getModel(), order.getBrand(),
+                    convertToClientDto(order.getClient()), convertToDriverDto(order.getDriver()));
+        } else {
+            return new OrderDto(order.getId(), order.getOrigin(), order.getDestination(), order.getValue(),
+                    order.getStatus(), order.getDescription(), order.getFeedback(), order.getCategory(),
+                    order.getWidth(), order.getHeight(), order.getLength(), order.getWeight(),
+                    null, null, null, convertToClientDto(order.getClient()), convertToDriverDto(order.getDriver()));
+        }
+    }
+
+    public ClientDto convertToClientDto(Client client) {
+        return new ClientDto(client.getId(), client.getName(), client.getEmail(), client.getBirthdate(),
+                client.getPhoneNumber(), client.getTaxPayerNumber(), client.getStreet(),
+                client.getCity(), client.getPostalCode());
     }
 
     // Updates the profile of a driver.
     @Override
     public DriverDto editProfile(Long driverId, DriverDto driverDto) {
         Driver driver = getDriverById(driverId);
+        verifyDriverUniqueAttributes(driverDto.getEmail(), driverDto.getPhoneNumber(), driverDto.getTaxPayerNumber());
 
         // Updates driver details.
-        driver.setName(driverDto.name());
-        driver.setEmail(driverDto.email());
-        driver.setPhoneNumber(driverDto.phoneNumber());
-        driver.setTaxPayerNumber(driverDto.taxPayerNumber());
-        driver.setStreet(driverDto.street());
-        driver.setCity(driverDto.city());
-        driver.setPostalCode(driverDto.postalCode());
+        driver.setName(driverDto.getName());
+        driver.setEmail(driverDto.getEmail());
+        driver.setBirthdate(driverDto.getBirthdate());
+        driver.setPhoneNumber(driverDto.getPhoneNumber());
+        driver.setTaxPayerNumber(driverDto.getTaxPayerNumber());
+        driver.setStreet(driverDto.getStreet());
+        driver.setCity(driverDto.getCity());
+        driver.setPostalCode(driverDto.getPostalCode());
 
         driverRepository.save(driver);
 
-        // Returns the updated driver profile.
-        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("dd/MM/yyyy");
-        String formattedBirthdate = driver.getBirthdate().format(formatter);
-        return new DriverDto(driver.getName(), driver.getEmail(), formattedBirthdate, driver.getPhoneNumber(),
-                driver.getTaxPayerNumber(), driver.getStreet(), driver.getCity(), driver.getPostalCode(),
-                driver.getVehicle());
+        return convertToDriverDto(driver);
     }
 
-    // Accepts an order for a driver.
-    @Override
-    public void acceptOrder(Long orderId, Long driverId, String driverEmail) throws BusinessException {
-        Driver driver = driverRepository.findById(driverId).orElseThrow(() -> new BusinessException("Driver not found"));
-        driver.setId(orderId);
-        driverRepository.save(driver);
-    }
+
 
     // Changes the password of a driver after verifying the old password.
     @Override
@@ -159,35 +203,27 @@ public class DriverServiceImpl implements DriverService {
         driverRepository.save(driver);
     }
 
-    // Finds available drivers, converting each to a DriverDto.
-    @Override
-    public List<DriverDto> findAvailableDrivers() {
-        List<Driver> drivers = driverRepository.findAvailableDrivers();
-        return drivers.stream().map(this::convertToDriverDto).collect(Collectors.toList());
-    }
-
-    // Selects a driver for an order based on certain criteria (e.g., proximity).
-    @Override
-    public Driver selectDriverForOrder(Order order, List<Driver> availableDrivers) {
-        return availableDrivers.stream().findFirst().orElse(null);
-    }
 
     // Converts a Driver object to a DriverDto.
     public DriverDto convertToDriverDto(Driver driver) {
         VehicleDto vehicleDto = null;
         if (driver.getVehicle() != null) {
-            Vehicle vehicle = driver.getVehicle();
-            vehicleDto = new VehicleDto(vehicle.getYear(), vehicle.getBrand(), vehicle.getPlate(),
-                    vehicle.getModel(), vehicle.getCapacity());
+            vehicleDto = convertToVehicleDto(driver.getVehicle());
         }
 
-        assert vehicleDto != null;
+        if (vehicleDto == null) {
+            throw new BusinessException("VehicleDto cannot be null");
+        }
 
-        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("dd/MM/yyyy");
-        String formattedBirthdate = driver.getBirthdate().format(formatter);
-        return new DriverDto(driver.getName(), driver.getEmail(), formattedBirthdate, driver.getPhoneNumber(),
-                driver.getTaxPayerNumber(), driver.getStreet(), driver.getCity(), driver.getPostalCode(),
-                vehicleDto);
+        return new DriverDto(driver.getId(), driver.getName(), driver.getEmail(), driver.getBirthdate(),
+                driver.getPhoneNumber(), driver.getTaxPayerNumber(), driver.getStreet(),
+                driver.getCity(), driver.getPostalCode(), driver.getLocation(), vehicleDto);
+    }
+
+    // Converts a Vehicle object to a VehicleDto.
+    public VehicleDto convertToVehicleDto(Vehicle vehicle) {
+        return new VehicleDto(vehicle.getCategory(), vehicle.getYear(),
+                vehicle.getPlate(), vehicle.getBrand(), vehicle.getModel());
     }
 
     // Updates a driver's location and online status.
@@ -198,6 +234,14 @@ public class DriverServiceImpl implements DriverService {
 
         driver.setLocation(location); // Assumes a GeoPoint or similar model adjustment in the Driver class.
         driver.setIsOnline(isOnline);
+        //TODO: remover isso do codigo depois
+        if (driver.getIsBusy()){
+            driver.setIsBusy(false);
+        }
         driverRepository.save(driver);
     }
+
+
+
+
 }

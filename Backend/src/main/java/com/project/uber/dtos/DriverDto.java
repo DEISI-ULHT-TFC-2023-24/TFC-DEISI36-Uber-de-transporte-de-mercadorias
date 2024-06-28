@@ -1,29 +1,43 @@
 package com.project.uber.dtos;
 
 import com.project.uber.model.Vehicle;
+import lombok.Getter;
+import lombok.Setter;
 
 import java.time.LocalDate;
 
-public record DriverDto(String name,
-                        String email,
-                        String birthdate,
-                        String password,
-                        String phoneNumber,
-                        int taxPayerNumber,
-                        String street,
-                        String city,
-                        int postalCode,
+@Getter
+@Setter
+public class DriverDto {
+    private Long id;
+    private String name;
+    private String email;
+    private String birthdate;
+    private String phoneNumber;
+    private int taxPayerNumber;
+    private String street;
+    private String city;
+    private String postalCode;
+    private String location; // latitude e longitude
+    private VehicleDto vehicleDto;
 
-                        // byte[] criminalRecord evitar essa complexidade agora
-                        Vehicle vehicleDto
-
-) {
-    public DriverDto(String name, String email, String birthdate,  String phoneNumber, int taxPayerNumber, String street, String city, int postalCode, VehicleDto vehicleDto) {
-        this(name, email, birthdate, phoneNumber, taxPayerNumber, street, city, postalCode, new Vehicle(vehicleDto.getYear(), vehicleDto.getPlate(), vehicleDto.getBrand(), vehicleDto.getModel(), vehicleDto.getCapacity()));
+    public DriverDto(Long id, String name, String email, String birthdate,
+                     String phoneNumber, Integer taxPayerNumber,
+                     String street, String city, String postalCode, String location,
+                     VehicleDto vehicleDto) {
+        this.id = id;
+        this.name = name;
+        this.email = email;
+        this.birthdate = birthdate;
+        this.phoneNumber = phoneNumber;
+        this.taxPayerNumber = taxPayerNumber;
+        this.street = street;
+        this.city = city;
+        this.postalCode = postalCode;
+        this.location = location;
+        this.vehicleDto = vehicleDto;
     }
 
-    public DriverDto(String name, String email, String birthdate, String phoneNumber, int taxPayerNumber, String street, String city, int postalCode, Vehicle vehicle) {
-        this(name, email, birthdate, null, phoneNumber, taxPayerNumber, street, city, postalCode, vehicle);
-    }
+    // Método estático de fábrica que aceita um Vehicle e constrói um VehicleDto
 
 }
