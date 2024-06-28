@@ -1,9 +1,9 @@
 # Uber de Transporte de Mercadorias
 
-## Texto e imagem para apresentação do trabalho
+## Introdução
 O projeto "Uber de Transporte de Mercadorias" é uma plataforma digital inovadora desenvolvida para revolucionar o setor de transporte de mercadorias. Utilizando tecnologias avançadas como Spring Framework, PostgreSQL, Flutter e Google Maps API, a aplicação oferece uma solução eficiente, flexível e segura para conectar motoristas independentes a consumidores que necessitam de serviços de transporte. A plataforma destaca-se pela sua interface intuitiva, otimização de rotas em tempo real e autenticação segura via JWT. Com foco na sustentabilidade e eficiência operacional, este projeto visa transformar a logística de mercadorias, tornando-a mais acessível e adaptável às necessidades dos utilizadores.
 
-<img src="\Frontend\Driver\driver_app\assets\images\logo.png" width="200"/>
+<img src="\Frontend\Driver\driver_app\assets\images\logo.png" width="800"/>
 
 ## Desenvolvedores
 
